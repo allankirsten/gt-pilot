@@ -1,4 +1,4 @@
-"""Hear the GT-1 over USB audio: record, measure, metronome."""
+"""Hear the pedal over USB audio: record, measure, metronome."""
 import math
 import threading
 
@@ -12,11 +12,17 @@ class NoAudio(RuntimeError):
     pass
 
 
+# Set by the server to the connected pedal's profile; the audio device carries the same name as the MIDI port.
+profile = None
+
+
 def _device(kind):
+    from .profiles import DEFAULT
+    p = profile or DEFAULT
     for i, d in enumerate(sd.query_devices()):
-        if "GT-1" in d["name"] and d[f"max_{kind}_channels"] > 0:
+        if p.matches(d["name"]) and d[f"max_{kind}_channels"] > 0:
             return i
-    raise NoAudio("The GT-1 does not show up as an audio device. Check the USB cable and the GT-1 driver.")
+    raise NoAudio(f"The {p.name} does not show up as an audio device. Check the USB cable and the {p.name} driver.")
 
 
 def record(seconds):

@@ -1,58 +1,41 @@
-"""Parameter map for the BOSS GT-1.
+"""Parameter map for the connected BOSS GT pedal.
 
 The address map belongs to Roland and is never shipped with this project: it is read from the
-BOSS TONE STUDIO for GT-1 app the user already has installed, then cached on this machine only.
+BOSS TONE STUDIO app the user already has installed, then cached on this machine only.
 """
 import json
-import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-APP_CANDIDATES = [
-    "/Applications/BOSS_TONE_STUDIO_for_GT1.app",
-    "/Applications/BOSS/BOSS_TONE_STUDIO_for_GT1.app",
-    os.path.expanduser("~/Applications/BOSS_TONE_STUDIO_for_GT1.app"),
-]
+from .profiles import DEFAULT, Profile
+
 MAP_IN_APP = "Contents/Resources/_assets/data/addressmap_gt.json"
 _SUPPORT = Path.home() / "Library" / "Application Support"
 CACHE_DIR = _SUPPORT / "GT Pilot"
-# Earlier names: "GT-1 Conversational" (0.1.x), "Dial In" (0.2.x). On first run the newest old folder
-# moves to the new name, carrying patch backups and the cached map with it.
-for _old in (_SUPPORT / "Dial In", _SUPPORT / "GT-1 Conversational"):
-    if _old.is_dir() and not CACHE_DIR.exists():
-        try:
-            _old.rename(CACHE_DIR)
-        except OSError:
-            pass
+
+
+def migrate_data_dir():
+    """Earlier names: "GT-1 Conversational" (0.1.x), "Dial In" (0.2.x). The newest old folder moves to the
+    new name, carrying patch backups and the cached map with it. Called when the server starts, never on
+    import, so tests and scripts that import this module leave the user's folders alone."""
+    for old in (_SUPPORT / "Dial In", _SUPPORT / "GT-1 Conversational"):
+        if old.is_dir() and not CACHE_DIR.exists():
+            try:
+                old.rename(CACHE_DIR)
+            except OSError:
+                pass
 
 EDIT_BUFFER = [0x60, 0x00, 0x00, 0x00]
-PATCH_SIZE = 0x10 * 128 + 0x7F  # 2175 bytes, 60 00 00 00 .. 60 00 10 7E
-USER_SLOTS = 99
+PATCH_SIZE = DEFAULT.patch_size  # GT-1; use profile.patch_size for the connected pedal
+USER_SLOTS = DEFAULT.user_slots
 
-# Type lists, in value order (GT-1 Parameter Guide).
-TYPES = {
-    "OD_DS": ["MID BOOST", "CLEAN BOOST", "TREBLE BOOST", "CRUNCH", "NATURAL OD", "WARM OD", "FAT DS",
-              "LEAD DS", "METAL DS", "OCT FUZZ", "A-DIST", "BLUES OD", "OD-1", "T-SCREAM", "TURBO OD",
-              "DISTORTION", "RAT", "GUV DS", "DST+", "METAL ZONE", "60S FUZZ", "MUFF FUZZ"],
-    "PREAMP": ["NATURAL CLEAN", "FULL RANGE", "COMBO CRUNCH", "STACK CRUNCH", "HiGAIN STACK",
-               "POWER DRIVE", "EXTREME LEAD", "CORE METAL", "JC-120", "CLEAN TWIN", "PRO CRUNCH", "TWEED",
-               "DELUXE CRUNCH", "VO DRIVE", "VO LEAD", "MATCH DRIVE", "BG LEAD", "BG DRIVE", "MS1959 I",
-               "MS1959 I+II", "R-FIER VINTAGE", "R-FIER MODERN", "T-AMP LEAD", "SLDN", "5150 DRIVE",
-               "BGNR UB METAL", "ORNG ROCK"],
-    "FX": ["COMPRESSOR", "LIMITER", "T.WAH", "GRAPHIC EQ", "PARAMETRIC EQ", "TONE MODIFY", "GUITAR SIM",
-           "AC.GUITAR SIM", "SLOW GEAR", "OCTAVE", "PITCH SHIFTER", "HARMONIST", "OVERTONE", "FEEDBACKER",
-           "AC.PROCESSOR", "PHASER", "FLANGER", "TREMOLO", "ROTARY", "UNI-V", "VIBRATO", "CHORUS", "SUB DELAY"],
-    "COMP": ["BOSS COMP", "HI-BAND", "LIGHT", "D-COMP", "ORANGE", "FAT", "MILD", "STEREO COMP"],
-    "DELAY": ["STANDARD", "PAN", "REVERSE", "ANALOG", "TAPE", "MODULATE", "TERA ECHO"],
-    "REVERB": ["AMBIENCE", "ROOM", "HALL 1", "HALL 2", "PLATE", "SPRING", "MODULATE"],
-}
-TYPE_PARAMS = {
-    "OD/DS: TYPE": "OD_DS", "PREAMP A: TYPE": "PREAMP", "PREAMP B: TYPE": "PREAMP",
-    "COMP: TYPE": "COMP", "FX1: FX TYPE": "FX", "FX2: FX TYPE": "FX", "DELAY: TYPE": "DELAY", "REVERB: TYPE": "REVERB",
-}
+# GT-1 type lists, kept for callers that predate profiles. The connected pedal's lists are profile.types.
+TYPES = DEFAULT.types
+TYPE_PARAMS = DEFAULT.type_params
 
-# Known value ranges (GT-1 Parameter Guide). Anything else is limited to 0-127.
+# Known value ranges, the same on the GT-1 and GT-100 (Parameter Guide, MIDI Implementation). Anything
+# else is limited by its size in the map.
 RANGES = {
     "OD/DS: DRIVE": (0, 120), "PREAMP A: GAIN": (0, 120), "PREAMP B: GAIN": (0, 120),
     "DELAY: DELAY TIME": (1, 2000), "DELAY: EFFECT LEVEL": (0, 120),
@@ -115,9 +98,9 @@ class Param:
     address: tuple  # absolute address in the edit buffer
 
 
-def find_map():
-    cached = CACHE_DIR / "addressmap_gt.json"
-    for app in APP_CANDIDATES:
+def find_map(profile: Profile = DEFAULT):
+    cached = CACHE_DIR / profile.map_cache
+    for app in profile.app_candidates:
         src = Path(app) / MAP_IN_APP
         if src.exists():
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -127,13 +110,15 @@ def find_map():
     if cached.exists():
         return cached
     raise MapNotFound(
-        "BOSS TONE STUDIO for GT-1 is not installed. Install it once from boss.info (GT-1 > Downloads); "
+        f"{profile.app_label} is not installed. Install it once from boss.info ({profile.name} > Downloads); "
         "it only needs to be installed, never open.")
 
 
 class ParamMap:
-    def __init__(self):
-        raw = json.load(open(find_map()))
+    def __init__(self, profile: Profile = DEFAULT, path=None):
+        self.profile = profile
+        self.types, self.type_params = profile.types, profile.type_params
+        raw = json.load(open(path or find_map(profile)))
         base = to_int(EDIT_BUFFER)
         self.raw = raw
         self.patch = {}
@@ -173,30 +158,31 @@ class ParamMap:
 
     def value_for(self, name, value):
         """Accepts type names ('VO DRIVE'), 'on'/'off', or numbers. Validates range."""
-        table = TYPE_PARAMS.get(name)
+        table = self.type_params.get(name)
         if isinstance(value, str):
             v = value.strip()
             if table:
-                options = TYPES[table]
-                match = [i for i, t in enumerate(options) if t.lower() == v.lower()]
-                if not match:
-                    raise ValueError(f"'{value}' is not a valid type for {name}. Options: {', '.join(options)}")
-                return match[0]
+                i = self.profile.type_index(table, v)
+                if i is None:
+                    options = self.types[table]
+                    raise ValueError(f"'{value}' is not a valid type for {name} on the {self.profile.name}. "
+                                     f"Options: {', '.join(options)}")
+                return i
             if v.lower() in ("on", "off"):
                 return 1 if v.lower() == "on" else 0
             value = float(v)
         value = int(round(value))
         lo, hi = RANGES.get(name, (0, 128 ** self.patch[name].size - 1))
         if table:
-            lo, hi = 0, len(TYPES[table]) - 1
+            lo, hi = 0, len(self.types[table]) - 1
         if not lo <= value <= hi:
             raise ValueError(f"{name} must be between {lo} and {hi} (got {value})")
         return value
 
     def label(self, name, value):
-        table = TYPE_PARAMS.get(name)
-        if table and 0 <= value < len(TYPES[table]):
-            return TYPES[table][value]
+        table = self.type_params.get(name)
+        if table and 0 <= value < len(self.types[table]):
+            return self.types[table][value]
         if name.endswith("ON/OFF"):
             return "on" if value else "off"
         return value

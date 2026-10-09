@@ -1,4 +1,4 @@
-"""GT Pilot: an MCP server that lets Claude shape BOSS GT-1 tones by conversation."""
+"""GT Pilot: an MCP server that lets Claude shape tones on BOSS GT pedals (GT-1, GT-100, GT-001) by conversation."""
 import functools
 import re
 import unicodedata
@@ -13,13 +13,15 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 from gt1 import audio, updates  # noqa: E402
 from gt1.device import GT1, NotConnected, tone_studio_running  # noqa: E402
-from gt1.params import (BLOCKS, CACHE_DIR, TYPE_PARAMS, TYPES, USER_SLOTS, VOLUME_PARAMS,  # noqa: E402
-                        VOLUME_BIG_STEP, VOLUME_STEP, MapNotFound, ParamMap)
+from gt1.params import (BLOCKS, CACHE_DIR, VOLUME_PARAMS, VOLUME_BIG_STEP, VOLUME_STEP,  # noqa: E402
+                        MapNotFound, ParamMap, migrate_data_dir)
 
-INSTRUCTIONS = """You control a BOSS GT-1 guitar multi-effects pedal connected over USB.
+INSTRUCTIONS = """You control a BOSS GT guitar multi-effects pedal connected over USB: a GT-1, GT-100 or GT-001.
 How to work with the player:
-- Start with gt1_status. If Tone Studio is open, tell the player to close it (it reloads the patch and shows stale data).
-- To build a tone for a song: research the gear used on the original recording, translate it to GT-1 models, apply with adjust_tone, then ask the player to play. Name the patch (rename_patch) so the change is visible on the pedal display.
+- Start with gt1_status: it says which pedal is connected. Use only the models that pedal has (describe_parameters lists them); the GT-100 has more effects than the GT-1 and orders them differently, so always pass model names, never numbers, for type parameters.
+- If gt1_status says the pedal is experimental, tell the player once that support for it has not been tested on real hardware yet, and be extra careful: prefer live changes over saving, and confirm what they hear.
+- If Tone Studio is open, tell the player to close it (it reloads the patch and shows stale data).
+- To build a tone for a song: research the gear used on the original recording, translate it to that pedal's models, apply with adjust_tone, then ask the player to play. Name the patch (rename_patch) so the change is visible on the pedal display.
 - Make changes the player can clearly hear. If they say "nothing changed", first try one obvious change (for example gain to 100) to rule out a connection problem, and ask them to check the cables: a loose cable caused false alarms before.
 - Vague feedback ("sounds weird", "needs more drive", "muddy") is normal: translate it into a small, explained change. Keep changes the player already approved; change only what they asked about.
 - Volume matters (neighbors, ears). Level parameters rise at most 15 per call. When in doubt, use listen or match_volume instead of guessing.
@@ -38,10 +40,17 @@ _last_listen = None
 
 
 def pmap():
+    """Address map for the connected pedal, loaded again if a different pedal was plugged in."""
     global _map
-    if _map is None:
-        _map = ParamMap()
+    dev.connect()
+    audio.profile = dev.profile
+    if _map is None or _map.profile is not dev.profile:
+        _map = ParamMap(dev.profile)
     return _map
+
+
+def label(slot):
+    return dev.profile.slot_label(slot)
 
 
 def friendly(fn):
@@ -57,7 +66,7 @@ def friendly(fn):
             return {"ok": False, "problem": e.args[0] if e.args else str(e)}
         except Exception as e:  # noqa: BLE001
             dev.close()
-            return {"ok": False, "problem": f"Unexpected problem talking to the GT-1 ({type(e).__name__}: {e}). "
+            return {"ok": False, "problem": f"Unexpected problem talking to the {dev.profile.name} ({type(e).__name__}: {e}). "
                                             "Try again; if it repeats, unplug and replug the USB cable."}
     return wrapper
 
@@ -100,8 +109,13 @@ def gt1_status() -> dict:
     """Check the connection and what is loaded right now: current slot, patch name, unsaved changes,
     and anything that could get in the way (like Tone Studio being open). Call this first."""
     dev.connect()
+    pmap()
     unsaved, slot = _unsaved()
-    return {"ok": True, "connected": True, "slot": f"U{slot:02d}", "patch_name": dev.patch_name(),
+    pedal = {"pedal": dev.profile.name, "user_slots": f"{label(1)} to {label(dev.profile.user_slots)}"}
+    if not dev.profile.tested:
+        pedal["experimental"] = (f"Support for the {dev.profile.name} is new and not yet tested on real hardware. "
+                                 "Tell the player once, and ask them to report anything odd.")
+    return {"ok": True, "connected": True, **pedal, "slot": label(slot), "patch_name": dev.patch_name(),
             "unsaved_changes": unsaved, "undo_steps_available": len(_history),
             "metronome": f"{metronome.bpm} BPM" if metronome.bpm else "off", "warnings": _warnings(),
             **({"update_available": u} if (u := updates.check()) else {})}
@@ -129,7 +143,7 @@ def describe_parameters(block: str) -> dict:
     if not names:
         raise KeyError(f"No parameters start with '{block}'. Examples: PREAMP A, OD/DS, DELAY, REVERB, FX1, CHORUS, NS1")
     params = {n: m.label(n, m.decode(raw, n)) for n in names[:80]}
-    models = {n: TYPES[t] for n, t in TYPE_PARAMS.items() if n in names}
+    models = {n: m.types[t] for n, t in m.type_params.items() if n in names}
     return {"ok": True, "parameters": params, "available_models": models,
             "truncated": len(names) > 80}
 
@@ -157,7 +171,7 @@ def adjust_tone(changes: dict, allow_big_volume_jump: bool = False) -> dict:
             v = before[n] + step
         plan[n] = v
     # type changes first, they take the pedal longer to process
-    for n in sorted(plan, key=lambda k: 0 if k in TYPE_PARAMS else 1):
+    for n in sorted(plan, key=lambda k: 0 if k in m.type_params else 1):
         addr, data = m.encode(n, plan[n])
         dev.write(addr, data)
         time.sleep(0.25 if n.endswith("TYPE") else 0.03)
@@ -173,7 +187,7 @@ def adjust_tone(changes: dict, allow_big_volume_jump: bool = False) -> dict:
 @friendly
 def rename_patch(name: str) -> dict:
     """Rename the loaded patch (max 16 characters). The name shows on the pedal display, which confirms
-    the change reached the GT-1."""
+    the change reached the pedal."""
     m = pmap()
     before_raw = dev.read_patch()
     plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()  # display is ASCII only
@@ -198,59 +212,65 @@ def undo_last_change() -> dict:
 @mcp.tool()
 @friendly
 def list_patches(refresh: bool = False) -> dict:
-    """Names of the 99 user patches (U01..U99). Cached after the first read; refresh=true reads again."""
-    if refresh or len(_names) < USER_SLOTS:
-        for s in range(1, USER_SLOTS + 1):
+    """Names of all user patches (GT-1: U01..U99; GT-100/GT-001: U01-1..U50-4). Cached after the first read;
+    refresh=true reads again."""
+    total = pmap().profile.user_slots
+    if refresh or len(_names) < total or max(_names, default=0) > total:
+        _names.clear()
+        for s in range(1, total + 1):
             _names[s] = dev.patch_name(s)
-    return {"ok": True, "patches": {f"U{s:02d}": n for s, n in sorted(_names.items())},
-            "loaded": f"U{dev.current_slot():02d}"}
+    return {"ok": True, "patches": {label(s): n for s, n in sorted(_names.items())},
+            "loaded": label(dev.current_slot())}
 
 
 @mcp.tool()
 @friendly
-def load_patch(slot: int, discard_unsaved_changes: bool = False) -> dict:
-    """Switch the GT-1 to user patch `slot` (1-99). If the loaded patch has unsaved changes this stops and
-    asks first; pass discard_unsaved_changes=true only after the player agrees to lose them."""
-    if not 1 <= slot <= USER_SLOTS:
-        raise ValueError("Slot must be between 1 and 99.")
+def load_patch(slot: int | str, discard_unsaved_changes: bool = False) -> dict:
+    """Switch the pedal to a user patch. `slot` is the label shown on the pedal (GT-1: "U05";
+    GT-100/GT-001: "U12-3") or its number. If the loaded patch has unsaved changes this stops and asks
+    first; pass discard_unsaved_changes=true only after the player agrees to lose them."""
+    slot = pmap().profile.parse_slot(slot)
     unsaved, current = _unsaved()
     if unsaved and not discard_unsaved_changes:
         return {"ok": False, "needs_confirmation": True,
-                "problem": f"'{dev.patch_name()}' (U{current:02d}) has unsaved changes. Save them first "
+                "problem": f"'{dev.patch_name()}' ({label(current)}) has unsaved changes. Save them first "
                            f"(save_patch) or confirm discarding them."}
     dev.load_slot(slot)
     _history.clear()
-    return {"ok": True, "loaded": f"U{slot:02d}", "patch_name": dev.patch_name()}
+    return {"ok": True, "loaded": label(slot), "patch_name": dev.patch_name()}
 
 
 @mcp.tool()
 @friendly
-def save_patch(slot: int, overwrite_confirmed: bool = False) -> dict:
-    """Save the loaded patch into user slot `slot` (1-99). First call without overwrite_confirmed to see what
-    is in the slot; only call again with overwrite_confirmed=true after the player says yes.
+def save_patch(slot: int | str, overwrite_confirmed: bool = False) -> dict:
+    """Save the loaded patch into a user slot (label as shown on the pedal, like "U05" or "U12-3", or its
+    number). First call without overwrite_confirmed to see what is in the slot; only call again with
+    overwrite_confirmed=true after the player says yes.
     A backup of the old slot is always kept, and the save is verified byte by byte."""
-    if not 1 <= slot <= USER_SLOTS:
-        raise ValueError("Slot must be between 1 and 99.")
+    slot = pmap().profile.parse_slot(slot)
+    name = label(slot)
     target_raw = dev.read_patch(slot)
     target_name = bytes(target_raw[:16]).decode("ascii", "replace").rstrip()
     buf = dev.read_patch()
     buf_name = bytes(buf[:16]).decode("ascii", "replace").rstrip()
     if target_raw == buf:
-        return {"ok": True, "slot": f"U{slot:02d}", "message": f"U{slot:02d} already holds exactly this patch."}
+        return {"ok": True, "slot": name, "message": f"{name} already holds exactly this patch."}
     if not overwrite_confirmed:
         return {"ok": False, "needs_confirmation": True,
-                "problem": f"U{slot:02d} currently holds '{target_name}'. Saving '{buf_name}' there replaces it "
+                "problem": f"{name} currently holds '{target_name}'. Saving '{buf_name}' there replaces it "
                            f"(a backup is kept). Ask the player to confirm."}
     backups = CACHE_DIR / "backups"
     backups.mkdir(parents=True, exist_ok=True)
     safe_name = re.sub(r"[^A-Za-z0-9 _-]", "-", target_name).strip() or "untitled"
-    backup = backups / f"U{slot:02d}_{time.strftime('%Y%m%d-%H%M%S')}_{safe_name}.json"
-    json.dump({"slot": slot, "name": target_name, "raw": target_raw}, open(backup, "w"))
+    prefix = "" if dev.profile.key == "gt1" else f"{dev.profile.key}_"  # GT-1 names unchanged from 0.1-0.3
+    backup = backups / f"{prefix}{name}_{time.strftime('%Y%m%d-%H%M%S')}_{safe_name}.json"
+    json.dump({"pedal": dev.profile.name, "slot": slot, "label": name, "name": target_name, "raw": target_raw},
+              open(backup, "w"))
     dev.write_patch(slot, buf)
     time.sleep(0.3)
     ok = dev.read_patch(slot) == buf
     _names[slot] = buf_name
-    res = {"ok": ok, "slot": f"U{slot:02d}", "saved": buf_name, "replaced": target_name, "backup": str(backup)}
+    res = {"ok": ok, "slot": name, "saved": buf_name, "replaced": target_name, "backup": str(backup)}
     if tone_studio_running():
         res["warning"] = "Tone Studio is open and will still show the old name until it reconnects."
     if not ok:
@@ -261,11 +281,14 @@ def save_patch(slot: int, overwrite_confirmed: bool = False) -> dict:
 @mcp.tool()
 @friendly
 def backup_all_patches() -> dict:
-    """Save a full backup of all 99 user patches to a file on this Mac (takes about a minute)."""
-    data = {f"U{s:02d}": dev.read_patch(s) for s in range(1, USER_SLOTS + 1)}
+    """Save a full backup of every user patch to a file on this Mac (a minute on the GT-1, about two on
+    the GT-100)."""
+    p = pmap().profile
+    data = {p.slot_label(s): dev.read_patch(s) for s in range(1, p.user_slots + 1)}
     folder = CACHE_DIR / "backups"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"all_user_patches_{time.strftime('%Y%m%d-%H%M%S')}.json"
+    prefix = "" if p.key == "gt1" else f"{p.key}_"
+    path = folder / f"{prefix}all_user_patches_{time.strftime('%Y%m%d-%H%M%S')}.json"
     json.dump(data, open(path, "w"))
     return {"ok": True, "file": str(path)}
 
@@ -274,7 +297,7 @@ def backup_all_patches() -> dict:
 @mcp.tool()
 @friendly
 def listen(seconds: float = 10) -> dict:
-    """Record the GT-1's processed sound over USB while the player plays, and measure it: loudness, peak,
+    """Record the pedal's processed sound over USB while the player plays, and measure it: loudness, peak,
     brightness, balance across bands, noise in pauses, clipping. Tell the player to start playing right away
     (with pauses between phrases if you want to judge noise). Compares with the previous listen."""
     global _last_listen
@@ -364,7 +387,7 @@ def calibrate_noise_gate(max_seconds: float = 45) -> dict:
 @mcp.tool()
 @friendly
 def metronome_control(action: str, bpm: float = 100, volume: float = 0.15) -> dict:
-    """Start or stop a click through the GT-1 output. action: 'start' or 'stop'. volume 0.05-0.5
+    """Start or stop a click through the pedal's output. action: 'start' or 'stop'. volume 0.05-0.5
     (default is quiet on purpose). The first beat of each bar is higher."""
     if action == "stop":
         metronome.stop()
@@ -374,4 +397,5 @@ def metronome_control(action: str, bpm: float = 100, volume: float = 0.15) -> di
 
 
 if __name__ == "__main__":
+    migrate_data_dir()
     mcp.run()
