@@ -32,6 +32,7 @@ How to work with the player:
   practice ("start the metronome at 90").
   End by asking what they want to play. Show the menu once per conversation, and again only if they ask what you can do. If they already asked for something, skip the menu and do it.
 - When the player asks how something works or what else you can do, point them to the guide: https://allankirsten.com/lab/gt-pilot/help (English: https://allankirsten.com/en/lab/gt-pilot/help).
+- If gt1_status reports full_backup, back up every patch first (backup_all_patches), once, before any change. Say it in one line: their sounds are safe on this computer before you start.
 - If Tone Studio is open, tell the player to close it (it reloads the patch and shows stale data).
 - To build a tone for a song: research the gear used on the original recording, translate it to that pedal's models, apply with adjust_tone, then ask the player to play. Name the patch (rename_patch) so the change is visible on the pedal display.
 - Make changes the player can clearly hear. If they say "nothing changed", first try one obvious change (for example gain to 100) to rule out a connection problem, and ask them to check the cables: a loose cable caused false alarms before.
@@ -124,6 +125,9 @@ def gt1_status() -> dict:
     pmap()
     unsaved, slot = _unsaved()
     pedal = {"pedal": dev.profile.name, "user_slots": f"{label(1)} to {label(dev.profile.user_slots)}"}
+    if not _has_full_backup(dev.profile):
+        pedal["full_backup"] = ("None yet on this computer. Before changing anything, tell the player you will first "
+                                "save a copy of all their patches (about a minute) and call backup_all_patches.")
     if not dev.profile.tested:
         pedal["experimental"] = (f"Support for the {dev.profile.name} is new and not yet tested on real hardware. "
                                  "Tell the player once, and ask them to report anything odd.")
@@ -299,10 +303,17 @@ def backup_all_patches() -> dict:
     data = {p.slot_label(s): dev.read_patch(s) for s in range(1, p.user_slots + 1)}
     folder = CACHE_DIR / "backups"
     folder.mkdir(parents=True, exist_ok=True)
-    prefix = "" if p.key == "gt1" else f"{p.key}_"
-    path = folder / f"{prefix}all_user_patches_{time.strftime('%Y%m%d-%H%M%S')}.json"
+    path = folder / f"{_backup_prefix(p)}all_user_patches_{time.strftime('%Y%m%d-%H%M%S')}.json"
     json.dump(data, open(path, "w"))
     return {"ok": True, "file": str(path)}
+
+
+def _backup_prefix(p):
+    return "" if p.key == "gt1" else f"{p.key}_"
+
+
+def _has_full_backup(p):
+    return any((CACHE_DIR / "backups").glob(f"{_backup_prefix(p)}all_user_patches_*.json"))
 
 
 # ---------------------------------------------------------------------------- listening
