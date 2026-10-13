@@ -1,0 +1,21 @@
+name: tests
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - name: unit tests (no pedal)
+        shell: bash
+        run: for t in tests/*.py; do uv run python "$t" || exit 1; done
+      - name: server starts and lists its tools
+        shell: bash
+        run: uv run python -c "import sys; sys.path.insert(0, 'src'); import server, asyncio; print(len(asyncio.run(server.mcp.list_tools())), 'tools')"
+      - name: pack
+        shell: bash
+        run: npx -y @anthropic-ai/mcpb pack . gt-pilot.mcpb

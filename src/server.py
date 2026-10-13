@@ -16,6 +16,10 @@ from gt1.device import GT1, NotConnected, tone_studio_running  # noqa: E402
 from gt1.params import (BLOCKS, CACHE_DIR, VOLUME_PARAMS, VOLUME_BIG_STEP, VOLUME_STEP,  # noqa: E402
                         MapNotFound, ParamMap, migrate_data_dir)
 
+MIC_HINT = ("Windows may be blocking the microphone: Settings > Privacy & security > Microphone > turn on "
+            "'Let desktop apps access your microphone'." if sys.platform == "win32" else
+            "macOS may be blocking the microphone: System Settings > Privacy & Security > Microphone > allow Claude.")
+
 INSTRUCTIONS = """You control a BOSS GT guitar multi-effects pedal connected over USB: a GT-1, GT-100 or GT-001.
 How to work with the player:
 - Start with gt1_status: it says which pedal is connected. Use only the models that pedal has (describe_parameters lists them); the GT-100 has more effects than the GT-1 and orders them differently, so always pass model names, never numbers, for type parameters.
@@ -289,7 +293,7 @@ def save_patch(slot: int | str, overwrite_confirmed: bool = False) -> dict:
 @mcp.tool()
 @friendly
 def backup_all_patches() -> dict:
-    """Save a full backup of every user patch to a file on this Mac (a minute on the GT-1, about two on
+    """Save a full backup of every user patch to a file on this computer (a minute on the GT-1, about two on
     the GT-100)."""
     p = pmap().profile
     data = {p.slot_label(s): dev.read_patch(s) for s in range(1, p.user_slots + 1)}
@@ -315,8 +319,7 @@ def listen(seconds: float = 10) -> dict:
     if result["digital_silence"]:
         result["hint"] = ("Nothing was captured. Most likely the player was not playing yet (the noise suppressor "
                           "outputs pure silence). Ask them to play during the whole recording. If they were playing, "
-                          "macOS may be blocking the microphone: System Settings > Privacy & Security > Microphone > "
-                          "allow Claude.")
+                          + MIC_HINT)
     elif result["is_silent"]:
         result["hint"] = "Almost no sound was captured. Was the player playing? Check guitar volume and cables."
     if _last_listen:

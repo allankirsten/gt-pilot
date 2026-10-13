@@ -29,13 +29,14 @@ class Profile:
     patch_size: int           # bytes in one patch, from the edit buffer start
     user_slots: int
     app_label: str            # editor app, for messages
-    app_candidates: tuple     # where that app may be installed
+    app_candidates: tuple     # where that app may be installed (macOS .app bundles)
     map_cache: str            # cache file name for its address map
     types: dict               # type table name -> model names in value order
     type_params: dict         # parameter -> type table name
     aliases: dict = field(default_factory=dict)   # other spellings Claude may use -> table name
     slots_per_bank: int = 0   # 0 = plain U01..U99 numbering
     tested: bool = True
+    win_dirs: tuple = ()      # its folder name under Program Files on Windows
 
     def slot_addr(self, slot):
         """User patch address. Slots past 128 carry into the next address byte (10 7F -> 11 00)."""
@@ -146,6 +147,7 @@ GT1 = Profile(
     patch_size=0x10 * 128 + 0x7F,                   # 2175 bytes, 60 00 00 00 .. 60 00 10 7E
     user_slots=99,
     app_label="BOSS TONE STUDIO for GT-1",
+    win_dirs=("BOSS TONE STUDIO for GT-1",),        # same map file as the Mac app, checked byte by byte
     app_candidates=(
         "/Applications/BOSS_TONE_STUDIO_for_GT1.app",
         "/Applications/BOSS/BOSS_TONE_STUDIO_for_GT1.app",
@@ -164,7 +166,7 @@ GT100 = Profile(
     patch_size=0x10 * 128 + 0x3C,                   # 2108 bytes, through 60 00 10 3B (editor map, firmware Ver.2)
     user_slots=200, slots_per_bank=4,               # U01-1 .. U50-4
     app_label="BOSS TONE STUDIO for GT",
-    app_candidates=_GT100_APPS,
+    app_candidates=_GT100_APPS, win_dirs=("BOSS TONE STUDIO for GT",),
     map_cache="addressmap_gt100.json",
     types=_GT100_TYPES, type_params=_GT100_TYPE_PARAMS, aliases=_GT100_ALIASES,
     tested=False,

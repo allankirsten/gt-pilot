@@ -1,5 +1,6 @@
 """MIDI connection to a BOSS GT pedal (Roland SysEx RQ1/DT1). What differs per pedal is in profiles.py."""
 import subprocess
+import sys
 import time
 
 import mido
@@ -22,12 +23,27 @@ def checksum(body):
     return (128 - sum(body) % 128) % 128
 
 
+IS_WINDOWS = sys.platform == "win32"
+
+
 def tone_studio_running():
     try:
+        if IS_WINDOWS:
+            out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            return "boss tone studio" in out.stdout.lower()
         out = subprocess.run(["pgrep", "-f", "BOSS TONE STUDIO"], capture_output=True, text=True)
         return bool(out.stdout.strip())
     except OSError:
         return False
+
+
+def midi_ports():
+    """MIDI port names as this computer sees them, for diagnostics."""
+    try:
+        return sorted(set(mido.get_output_names()) | set(mido.get_input_names()))
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def find_pedal(outputs):
@@ -57,9 +73,11 @@ class GT1:
         out_name, profile = find_pedal(mido.get_output_names())
         if not out_name:
             supported = ", ".join(p.name for p in PROFILES)
+            ports = midi_ports()
             raise NotConnected(
                 f"No BOSS GT pedal found ({supported}). Check that it is powered on, the USB cable is connected, "
-                "and its USB driver is installed.")
+                "and its USB driver is installed. MIDI ports this computer sees: "
+                f"{', '.join(ports) if ports else 'none'}.")
         last = None
         for _ in range(3):  # CoreMIDI sometimes fails the first open (-304)
             try:
@@ -72,6 +90,11 @@ class GT1:
                 last = e
                 self.close()
                 time.sleep(0.5)
+        if IS_WINDOWS:
+            raise NotConnected(
+                f"Could not open the {profile.name} MIDI port ({last}). On Windows only one program can use it at a "
+                "time: close BOSS TONE STUDIO and any other music software, then try again. If it still fails, "
+                "unplug and replug the USB cable.")
         raise NotConnected(f"Could not open the {profile.name} MIDI port ({last}). Unplug and replug the USB cable.")
 
     def close(self):

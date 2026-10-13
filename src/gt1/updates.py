@@ -56,7 +56,9 @@ def current_version():
 
 
 def _vtuple(v):
-    return tuple(int(p) for p in str(v).split(".") if p.isdigit())
+    """'0.4.0-beta.1' sorts below '0.4.0', so beta testers still hear about the final release."""
+    base, _, pre = str(v).partition("-")
+    return tuple(int(p) for p in base.split(".") if p.isdigit()) + (0 if pre else 1,)
 
 
 def _load_state():

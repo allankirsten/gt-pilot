@@ -4,15 +4,36 @@ The address map belongs to Roland and is never shipped with this project: it is 
 BOSS TONE STUDIO app the user already has installed, then cached on this machine only.
 """
 import json
+import os
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from .profiles import DEFAULT, Profile
 
-MAP_IN_APP = "Contents/Resources/_assets/data/addressmap_gt.json"
-_SUPPORT = Path.home() / "Library" / "Application Support"
+IS_WINDOWS = sys.platform == "win32"
+MAP_IN_APP = "Contents/Resources/_assets/data/addressmap_gt.json"   # inside the macOS .app
+MAP_IN_DIR = "_assets/data/addressmap_gt.json"                      # inside the Windows install folder
+if IS_WINDOWS:
+    _SUPPORT = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+else:
+    _SUPPORT = Path.home() / "Library" / "Application Support"
 CACHE_DIR = _SUPPORT / "GT Pilot"
+
+
+def map_candidates(profile: Profile):
+    """Where the editor app may keep its address map on this OS."""
+    if not IS_WINDOWS:
+        return [Path(app) / MAP_IN_APP for app in profile.app_candidates]
+    bases = [os.environ.get(k) for k in ("ProgramFiles(x86)", "ProgramFiles", "ProgramW6432")]
+    local = os.environ.get("LOCALAPPDATA")
+    bases += [str(Path(local) / "Programs")] if local else []
+    found = []
+    for base in filter(None, bases):
+        for d in profile.win_dirs:
+            found += [Path(base) / d / MAP_IN_DIR, Path(base) / "BOSS" / d / MAP_IN_DIR, Path(base) / "Roland" / d / MAP_IN_DIR]
+    return found
 
 
 def migrate_data_dir():
@@ -100,8 +121,7 @@ class Param:
 
 def find_map(profile: Profile = DEFAULT):
     cached = CACHE_DIR / profile.map_cache
-    for app in profile.app_candidates:
-        src = Path(app) / MAP_IN_APP
+    for src in map_candidates(profile):
         if src.exists():
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
             if not cached.exists() or cached.stat().st_mtime < src.stat().st_mtime:

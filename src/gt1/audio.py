@@ -22,7 +22,9 @@ def _device(kind):
     for i, d in enumerate(sd.query_devices()):
         if p.matches(d["name"]) and d[f"max_{kind}_channels"] > 0:
             return i
-    raise NoAudio(f"The {p.name} does not show up as an audio device. Check the USB cable and the {p.name} driver.")
+    names = sorted({d["name"] for d in sd.query_devices()})
+    raise NoAudio(f"The {p.name} does not show up as an audio device. Check the USB cable and the {p.name} driver. "
+                  f"Audio devices this computer sees: {', '.join(names) if names else 'none'}.")
 
 
 def record(seconds):
