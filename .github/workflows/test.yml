@@ -6,6 +6,8 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      UV_NO_BUILD: 1  # users have no compiler: every dependency must come as a prebuilt wheel
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

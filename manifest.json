@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "gt-pilot",
   "display_name": "GT Pilot for BOSS",
-  "version": "0.4.0-beta.1",
+  "version": "0.4.0-beta.2",
   "description": "Shape tones on your BOSS GT-1 by talking to Claude: ask for a song, say what sounds off, and hear it change.",
   "long_description": "Connect a BOSS GT-1 over USB and talk to Claude about your tone. Ask for the sound of a song, say it needs more drive or sounds muddy, and the change is applied live on the pedal. Claude can also listen through the GT-1's USB audio to measure loudness and noise, level your patches, clean up string noise, and run a metronome.\n\nSafety is built in: volume rises in small steps, nothing overwrites a saved patch without asking, every change can be undone, and every save keeps a backup.\n\nRequirements: a BOSS GT-1, its USB driver, and BOSS TONE STUDIO for GT-1 installed (it is read for the parameter map and does not need to be open; keep it closed while using this extension).\n\nFree and open source (MIT). Independent project, not affiliated with BOSS or Roland Corporation; BOSS and GT-1 are trademarks of Roland Corporation.",
   "author": {
@@ -123,7 +123,7 @@
       "win32"
     ],
     "runtimes": {
-      "python": ">=3.10"
+      "python": ">=3.10,<3.13"
     }
   }
 }

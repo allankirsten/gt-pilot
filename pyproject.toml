@@ -1,8 +1,8 @@
 [project]
 name = "gt-pilot"
-version = "0.3.1"
+version = "0.4.0b2"
 description = "Shape BOSS GT-1 tones by talking to Claude"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "mcp>=1.2.0,<2",
     "mido>=1.3",
