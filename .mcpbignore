@@ -5,3 +5,5 @@ dist/
 .git/
 scripts/
 tests/
+.ruff_cache/
+.github/
