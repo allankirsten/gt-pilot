@@ -1,0 +1,12 @@
+{
+  "name": "gt-pilot",
+  "interface": {"displayName": "GT Pilot"},
+  "plugins": [
+    {
+      "name": "gt-pilot",
+      "source": {"source": "local", "path": "./"},
+      "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+      "category": "Music"
+    }
+  ]
+}

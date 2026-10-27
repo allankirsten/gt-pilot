@@ -1,0 +1,17 @@
+#!/bin/sh
+# Starts GT Pilot inside the ChatGPT desktop app (plugin). Uses uv if the machine has it; otherwise
+# fetches a private copy into this plugin folder once. Anything printed goes to stderr: stdout is the MCP channel.
+cd "$(dirname "$0")/.." || exit 1
+PATH="${PATH:-/usr/bin:/bin}:/opt/homebrew/bin:/usr/local/bin"
+export PATH
+UV="$(command -v uv 2>/dev/null || true)"
+if [ -z "$UV" ]; then
+  UV="$PWD/.uv/uv"
+  if [ ! -x "$UV" ]; then
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$PWD/.uv" UV_NO_MODIFY_PATH=1 sh >&2 || {
+      echo "GT Pilot could not download its runtime. Check the internet connection and restart ChatGPT." >&2
+      exit 1
+    }
+  fi
+fi
+exec "$UV" run --quiet --directory "$PWD" src/server.py

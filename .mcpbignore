@@ -7,3 +7,7 @@ scripts/
 tests/
 .github/
 .ruff_cache/
+.codex-plugin/
+.agents/
+.mcp.json
+.uv/
