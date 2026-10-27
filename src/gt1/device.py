@@ -193,7 +193,19 @@ class GT1:
             raise NotConnected(f"The {self.profile.name} did not answer. Check the USB cable.")
         return (raw[0] << 7 | raw[1]) + 1
 
-    def load_slot(self, slot):
+    def load_slot(self, slot, timeout=3.0):
+        """Switch patches and wait until the pedal itself reports the new slot. Returns False if it never
+        did (a menu or the tuner open on the pedal can keep it from switching); one retry before giving up."""
         n = slot - 1
-        self.write(CURRENT_PATCH, [n >> 7, n & 0x7F])
-        time.sleep(1.2)
+        for _ in range(2):
+            self.write(CURRENT_PATCH, [n >> 7, n & 0x7F])
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                time.sleep(0.3)
+                try:
+                    if self.current_slot() == slot:
+                        time.sleep(0.5)  # let the edit buffer settle before anyone reads it
+                        return True
+                except NotConnected:
+                    pass
+        return False

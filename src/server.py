@@ -92,9 +92,16 @@ def _warnings():
     return w
 
 
+# Moved by the pedal's own expression pedal, so they change without anyone editing the patch.
+LIVE_PARAMS = ("FOOT VOLUME: LEVEL", "PEDAL FX: WAH: POSITION", "PEDAL FX: PEDAL BEND: POSITION",
+               "FX1: SUB WAH: PEDAL POS", "FX2: SUB WAH: PEDAL POS")
+
+
 def _unsaved(slot=None):
     slot = slot or dev.current_slot()
-    return dev.read_patch() != dev.read_patch(slot), slot
+    live = {i for n in LIVE_PARAMS if (p := pmap().patch.get(n)) for i in range(p.offset, p.offset + p.size)}
+    buf, saved = dev.read_patch(), dev.read_patch(slot)
+    return any(a != b for i, (a, b) in enumerate(zip(buf, saved)) if i not in live), slot
 
 
 def _summary(values):
@@ -251,9 +258,15 @@ def load_patch(slot: int | str, discard_unsaved_changes: bool = False) -> dict:
         return {"ok": False, "needs_confirmation": True,
                 "problem": f"'{dev.patch_name()}' ({label(current)}) has unsaved changes. Save them first "
                            f"(save_patch) or confirm discarding them."}
-    dev.load_slot(slot)
+    if not dev.load_slot(slot):
+        now = dev.current_slot()
+        return {"ok": False, "problem": f"The pedal did not switch to {label(slot)}; it still shows {label(now)} "
+                                        f"('{dev.patch_name()}'). Ask the player to leave any menu or the tuner on "
+                                        "the pedal, then try again.",
+                "slot": label(now)}
     _history.clear()
-    return {"ok": True, "loaded": label(slot), "patch_name": dev.patch_name()}
+    return {"ok": True, "loaded": label(slot), "patch_name": dev.patch_name(),
+            "unsaved_changes": _unsaved(slot)[0]}
 
 
 @mcp.tool()
