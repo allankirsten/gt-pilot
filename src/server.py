@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
+from mcp.types import ToolAnnotations  # noqa: E402
 
 from gt1 import audio, updates  # noqa: E402
 from gt1.device import GT1, NotConnected, tone_studio_running  # noqa: E402
@@ -42,6 +43,9 @@ How to work with the player:
 - Keep replies short: what changed, from what to what, and what to try next.
 - If gt1_status reports update_available, mention it once in a short line with the version and the link, then carry on. Never push it again in the same conversation.
 """
+
+# Tools that only read the pedal or listen to it: hosts like ChatGPT can run them without asking each time.
+READ_ONLY = ToolAnnotations(readOnlyHint=True)
 
 mcp = FastMCP("gt-pilot", instructions=INSTRUCTIONS)
 dev = GT1()
@@ -123,7 +127,7 @@ def _summary(values):
 
 
 # ---------------------------------------------------------------------------- status & reading
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 @friendly
 def gt1_status() -> dict:
     """Check the connection and what is loaded right now: current slot, patch name, unsaved changes,
@@ -144,7 +148,7 @@ def gt1_status() -> dict:
             **({"update_available": u} if (u := updates.check()) else {})}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 @friendly
 def get_current_tone() -> dict:
     """Readable summary of the patch currently loaded: every block, on/off, model and main knobs."""
@@ -154,7 +158,7 @@ def get_current_tone() -> dict:
             "patch_level": values.get("PATCH LEVEL")}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 @friendly
 def describe_parameters(block: str) -> dict:
     """List exact parameter names and current values for a block, for example 'PREAMP A', 'OD/DS',
@@ -232,7 +236,7 @@ def undo_last_change() -> dict:
 
 
 # ---------------------------------------------------------------------------- patches
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 @friendly
 def list_patches(refresh: bool = False) -> dict:
     """Names of all user patches (GT-1: U01..U99; GT-100/GT-001: U01-1..U50-4). Cached after the first read;
@@ -330,7 +334,7 @@ def _has_full_backup(p):
 
 
 # ---------------------------------------------------------------------------- listening
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 @friendly
 def listen(seconds: float = 10) -> dict:
     """Record the pedal's processed sound over USB while the player plays, and measure it: loudness, peak,
