@@ -57,3 +57,38 @@ rejects(envelope(download_url="http://allankirsten.com/x"), why="https")
 rejects(b"<html>hacked</html>", why="malformed")                 # junk instead of json
 rejects(json.dumps({"key_id": "k1", "payload": "!!", "signature": "x"}).encode(), why="malformed")
 print("all update-notice checks passed")
+
+
+# The request says version, system and "first" once per computer, never anything else.
+import tempfile  # noqa: E402
+
+from gt1 import updates  # noqa: E402
+
+def sessions(n, fetch):
+    updates._fetch = fetch
+    for _ in range(n):
+        updates._checked = False
+        updates.check()
+
+with tempfile.TemporaryDirectory() as d:
+    updates.STATE_FILE, updates.CACHE_DIR = Path(d) / "update_state.json", Path(d)
+    updates.enabled = lambda: True
+    seen = []
+
+    def offline(url=None, ua=None):
+        seen.append(ua)
+        raise Rejected("offline")
+
+    sessions(2, offline)  # the site never heard from this computer: keep saying "first"
+    assert all(u.endswith(" first") for u in seen), seen
+    assert seen[0].startswith(f"gt-pilot/{updates.current_version()} ") and seen[0].split()[1] in ("mac", "windows", "other")
+    sessions(2, lambda url=None, ua=None: seen.append(ua) or b"{}")  # reached the site (invalid notice is fine)
+    assert seen[-2].endswith(" first") and not seen[-1].endswith(" first"), seen
+
+with tempfile.TemporaryDirectory() as d:  # installed before 0.4.0: already has "seq", so not a new person
+    (Path(d) / "update_state.json").write_text('{"seq": 3}')
+    updates.STATE_FILE, updates.CACHE_DIR = Path(d) / "update_state.json", Path(d)
+    seen = []
+    sessions(1, lambda url=None, ua=None: seen.append(ua) or b"{}")
+    assert not seen[0].endswith(" first"), seen
+print("user agent checks passed")

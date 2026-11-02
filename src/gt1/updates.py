@@ -1,7 +1,9 @@
 """Signed update notice.
 
 Reads a small public file (latest.json) that says which version is the newest. Nothing about the
-user or the pedal is sent. The file only counts if it carries a valid Ed25519 signature from the
+user or the pedal is sent: the request only says which GT Pilot version and which system (mac, windows)
+it comes from, and "first" the very first time on this computer. No identifier, so the site can count
+how many people start using it and on which system, but never tell anyone apart. The file only counts if it carries a valid Ed25519 signature from the
 release key, which never lives on the website or on GitHub: someone who breaks into the site can
 replace the file but cannot sign it, so a forged notice is ignored.
 
@@ -11,6 +13,7 @@ replayed notice) is treated as "no update" and never as an error.
 import base64
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -103,10 +106,16 @@ def verify(envelope_bytes, keys=None, now=None, last_seq=0):
             "notes": str(payload.get("notes", ""))[:300], "sha256": str(payload.get("sha256", ""))[:64]}
 
 
-def _fetch(url=None):
+def user_agent(first=False):
+    """'gt-pilot/0.4.0 windows', plus ' first' once per computer. The only thing the request says."""
+    system = {"win32": "windows", "darwin": "mac"}.get(sys.platform, "other")
+    return f"gt-pilot/{current_version()} {system}" + (" first" if first else "")
+
+
+def _fetch(url=None, ua=None):
     url = url or LATEST_URL
     opener = urllib.request.build_opener(_NoRedirect)
-    req = urllib.request.Request(url, headers={"User-Agent": "gt-pilot-update-check"})
+    req = urllib.request.Request(url, headers={"User-Agent": ua or user_agent()})
     with opener.open(req, timeout=TIMEOUT) as r:
         if r.status != 200:
             raise Rejected(f"http {r.status}")
@@ -125,11 +134,20 @@ def check():
     if not enabled():
         return None
     state = _load_state()
+    # Empty state = this computer never reached the site before (installs older than 0.4.0 already saved "seq").
+    first = not state
     try:
-        notice = verify(_fetch(), last_seq=int(state.get("seq", 0)))
+        data = _fetch(ua=user_agent(first))
     except (Rejected, urllib.error.URLError, OSError, ValueError):
         return None
-    _save_state({"seq": notice["seq"]})
+    state["counted"] = True  # the server saw this computer once; "first" is never sent again
+    _save_state(state)
+    try:
+        notice = verify(data, last_seq=int(state.get("seq", 0)))
+    except (Rejected, ValueError):
+        return None
+    state["seq"] = notice["seq"]
+    _save_state(state)
     if _vtuple(notice["version"]) > _vtuple(current_version()):
         _result = {k: notice[k] for k in ("version", "download_url", "notes", "sha256")}
     return _result

@@ -9,10 +9,10 @@ GT Pilot runs entirely on your computer (Mac or Windows PC).
 
 **Audio.** When you ask Claude to listen, a few seconds of the GT-1 output are recorded and turned into numbers (loudness, brightness, noise). The recording is not stored or sent anywhere; only the numbers go back into the conversation.
 
-**Network.** One request per session to `https://allankirsten.com/lab/gt-pilot/latest.json` to check for a newer version. It sends no identifiers, no data about you, your pedal or your patches. On our side, the request is only counted (date and time), to know how often GT Pilot is used; IP addresses are not stored. You can turn it off in the extension settings (**Check for new versions**).
+**Network.** One request per session to `https://allankirsten.com/lab/gt-pilot/latest.json` to check for a newer version, made only after GT Pilot connects to your pedal. The request says three things and nothing else: the GT Pilot version, the system (`mac` or `windows`) and, the very first time on a computer, the word `first`. It carries no identifier, so we can count how many people start using GT Pilot and on which system, but cannot tell anyone apart or link two sessions to the same person. Nothing about you, your pedal or your patches is sent, and IP addresses are not stored. You can turn it off in the extension settings (**Check for new versions**).
 
 **Your conversation** is between you and Claude, under Anthropic's terms. GT Pilot adds tool results (patch names, parameter values, measurements) to it, nothing else.
 
-**No telemetry, no analytics, no accounts.**
+**No identifiers, no analytics, no accounts.** Besides the anonymous count above, nothing is collected.
 
 Questions: open an issue at https://github.com/allankirsten/gt-pilot/issues.
